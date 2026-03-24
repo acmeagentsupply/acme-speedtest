@@ -30,10 +30,22 @@ WRAPPER
 curl -fsSL "${SCRIPT_URL}" >> "${INSTALL_PATH}"
 chmod +x "${INSTALL_PATH}"
 
-# Check PATH
+# Add to PATH automatically
+SHELL_RC=""
+if [[ -f "${HOME}/.zshrc" ]]; then
+  SHELL_RC="${HOME}/.zshrc"
+elif [[ -f "${HOME}/.bashrc" ]]; then
+  SHELL_RC="${HOME}/.bashrc"
+fi
+
 if [[ ":${PATH}:" != *":${INSTALL_DIR}:"* ]]; then
-  printf '\n  \033[33m⚠\033[0m  Add %s to your PATH:\n' "${INSTALL_DIR}"
-  printf '     echo '\''export PATH="$HOME/.local/bin:$PATH"'\'' >> ~/.zshrc && source ~/.zshrc\n\n'
+  if [[ -n "${SHELL_RC}" ]]; then
+    if ! grep -q "${INSTALL_DIR}" "${SHELL_RC}" 2>/dev/null; then
+      echo "export PATH=\"${INSTALL_DIR}:\$PATH\"" >> "${SHELL_RC}"
+      printf '  Added %s to PATH in %s\n' "${INSTALL_DIR}" "${SHELL_RC}"
+    fi
+  fi
+  export PATH="${INSTALL_DIR}:${PATH}"
 fi
 
 printf '\n\033[32m✓\033[0m  Installed to %s\n' "${INSTALL_PATH}"
