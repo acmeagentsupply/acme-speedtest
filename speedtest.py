@@ -313,9 +313,100 @@ def format_status(probe: dict, rate: dict) -> tuple[str, str]:
     return pill, detail
 
 
+def render_dashboard_results(data: dict):
+    """Render results from dashboard probe endpoint."""
+    now_str = datetime.now().strftime("%Y-%m-%d %H:%M %Z")
+    print()
+    print(f"{BOLD}{'━'*70}{RESET}")
+    print(f"{BOLD}  ⚡ ACME Speedtest v{VERSION}  •  {now_str}{RESET}")
+    print(f"{BOLD}{'━'*70}{RESET}")
+    print()
+    print(f"  {'Model':<40} {'Status':<14} {'TTFT':<10} {'TPS':<8} {'Reliability'}")
+    print(f"  {'─'*40} {'─'*14} {'─'*10} {'─'*8} {'─'*12}")
+
+    results = data.get("results", [])
+    for r in results:
+        status = r.get("status", "unknown")
+        model = r.get("model", "unknown")
+        ttft = r.get("ttft_ms")
+        tps = r.get("tps")
+        reliability = r.get("reliability", "—")
+        latency = r.get("latency_ms")
+
+        # Status pill
+        if status == "ok":
+            pill = f"{GREEN}● OK         {RESET}"
+        elif status == "oauth_only":
+            pill = f"{CYAN}● OAUTH      {RESET}"
+        elif status == "blocked":
+            pill = f"{RED}● BLOCKED    {RESET}"
+        elif status == "timeout":
+            pill = f"{YELLOW}● TIMEOUT    {RESET}"
+        else:
+            pill = f"{RED}● ERROR      {RESET}"
+
+        # Format metrics
+        ttft_str = f"{ttft}ms" if ttft else "—"
+        tps_str = f"{tps}" if tps else "—"
+
+        short_name = model.replace("anthropic/", "").replace("openai/", "").replace("google/", "").replace("openrouter/", "")
+        print(f"  {short_name:<40} {pill} {ttft_str:<10} {tps_str:<8} {reliability}")
+
+        if r.get("message"):
+            print(f"  {' '*40}   {DIM}{r.get('message')[:50]}{RESET}")
+
+    print()
+    print(f"  {'─'*70}")
+
+    if data.get("summary"):
+        summary = data["summary"]
+        status = summary.get("status", "unknown")
+        text = summary.get("text", "")
+
+        if status == "ready":
+            verdict = f"{GREEN}{BOLD}TRANSMISSION READY{RESET}  {text}"
+        elif status == "critical":
+            verdict = f"{RED}{BOLD}NOT READY{RESET}  {text}"
+        else:
+            verdict = f"{YELLOW}{BOLD}DEGRADED{RESET}  {text}"
+
+        print(f"  {verdict}")
+        print()
+
+
+def probe_via_dashboard(dashboard_url="http://127.0.0.1:7771"):
+    """Try to use dashboard probe endpoint if available."""
+    import urllib.request
+    import urllib.error
+    try:
+        req = urllib.request.Request(
+            f"{dashboard_url}/api/speedtest/probe",
+            headers={"Content-Type": "application/json"},
+            method="GET"
+        )
+        with urllib.request.urlopen(req, timeout=10) as response:
+            return json.loads(response.read())
+    except Exception:
+        return None
+
+
 def run():
     args = sys.argv[1:]
     no_probe = "--no-probe" in args
+    dashboard_url = "http://127.0.0.1:7771"
+
+    # Check for custom dashboard URL
+    for i, arg in enumerate(args):
+        if arg == "--dashboard-url" and i + 1 < len(args):
+            dashboard_url = args[i + 1]
+
+    # Try dashboard probe endpoint first
+    if not no_probe:
+        dashboard_result = probe_via_dashboard(dashboard_url)
+        if dashboard_result:
+            print(f"{DIM}Using dashboard probe endpoint at {dashboard_url}{RESET}")
+            render_dashboard_results(dashboard_result)
+            return
 
     config_path = Path(os.environ.get("TRANSMISSION_CONFIG", str(DEFAULT_CONFIG_PATH)))
     log_path    = Path(os.environ.get("TRANSMISSION_LOG",    str(DEFAULT_LOG_PATH)))
@@ -395,10 +486,11 @@ Model health and rate limit intelligence for AI agent operators.
   acme-speedtest [options]
 
 {BOLD}OPTIONS{RESET}
-  --help        Show this help
-  --version     Print version and exit
-  --no-probe    Skip live API probes (log analysis only, no API calls)
-  --json        Output results as JSON
+  --help                Show this help
+  --version             Print version and exit
+  --no-probe            Skip live API probes (log analysis only, no API calls)
+  --dashboard-url URL   Dashboard probe endpoint (default: http://127.0.0.1:7771)
+  --json                Output results as JSON
 
 {BOLD}ENVIRONMENT{RESET}
   ANTHROPIC_API_KEY     Required to probe Anthropic models
