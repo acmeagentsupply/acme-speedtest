@@ -155,30 +155,32 @@ def count_failures_by_hour(events: list[dict], model: str) -> list[tuple]:
 # ── Probe ─────────────────────────────────────────────────────────────────────
 
 def load_openclaw_keys() -> dict:
-    """Read API keys from OpenClaw config if available."""
-    config_path = Path.home() / ".openclaw" / "openclaw.json"
-    if not config_path.exists():
+    """
+    Read API keys from OpenClaw auth-profiles.json.
+    This file is written by OpenClaw at runtime and contains plaintext provider keys.
+    Standard path: ~/.openclaw/agents/main/agent/auth-profiles.json
+    """
+    auth_path = Path.home() / ".openclaw" / "agents" / "main" / "agent" / "auth-profiles.json"
+    if not auth_path.exists():
         return {}
     try:
-        # OpenClaw config uses HJSON-like format — try json first
-        import json as _json
-        text = config_path.read_text()
-        # Strip single-line comments (OpenClaw uses them)
-        lines = [l for l in text.splitlines() if not l.strip().startswith("//")]
-        cfg = _json.loads("\n".join(lines))
-        # Keys are in auth.profiles or env.vars
-        keys = {}
-        env_vars = cfg.get("env", {}).get("vars", {})
-        for k, v in env_vars.items():
-            if v and not v.startswith("__"):
-                keys[k] = v
-        # Also check auth profiles for provider tokens
-        profiles = cfg.get("auth", {}).get("profiles", {})
+        profiles = json.loads(auth_path.read_text()).get("profiles", {})
+        key_map = {
+            "anthropic": "ANTHROPIC_API_KEY",
+            "openai":    "OPENAI_API_KEY",
+            "google":    "GOOGLE_API_KEY",
+        }
+        result = {}
         for profile_name, profile in profiles.items():
-            if "anthropic" in profile_name.lower():
-                # API key may be in keyring, not config — skip if redacted
-                pass
-        return keys
+            provider = profile.get("provider", "").lower()
+            key = profile.get("key", "")
+            if not key or key.startswith("__"):
+                continue
+            for p_prefix, env_name in key_map.items():
+                if p_prefix in provider or p_prefix in profile_name.lower():
+                    result[env_name] = key
+                    break
+        return result
     except Exception:
         return {}
 
@@ -283,6 +285,10 @@ def format_latency(ms: Optional[int]) -> str:
 
 def format_status(probe: dict, rate: dict) -> tuple[str, str]:
     """Returns (pill, detail)"""
+    if probe.get("skipped"):
+        if rate["status"] == "healthy":
+            return f"{GREEN}● HEALTHY   {RESET}", f"{DIM}log only — no probe{RESET}"
+        # Fall through to rate limit display
     if rate["status"] == "blocked":
         pill = f"{RED}● BLOCKED   {RESET}"
         cd = rate.get("cooldown_min", 0)
@@ -308,6 +314,9 @@ def format_status(probe: dict, rate: dict) -> tuple[str, str]:
 
 
 def run():
+    args = sys.argv[1:]
+    no_probe = "--no-probe" in args
+
     config_path = Path(os.environ.get("TRANSMISSION_CONFIG", str(DEFAULT_CONFIG_PATH)))
     log_path    = Path(os.environ.get("TRANSMISSION_LOG",    str(DEFAULT_LOG_PATH)))
 
@@ -333,8 +342,10 @@ def run():
         tier = cfg.get("tier", "?")
         rate = classify_rate_limit(events, model_id)
 
-        # Only probe if not clearly blocked from log
-        if rate["status"] in ("blocked",):
+        # Skip probing if --no-probe or clearly blocked from log
+        if no_probe:
+            probe = {"ok": True, "latency_ms": None, "skipped": True}
+        elif rate["status"] in ("blocked",):
             probe = {"ok": False, "is_rate_limit": True, "latency_ms": None, "error": "blocked (from log)"}
         else:
             sys.stdout.write(f"  {DIM}probing {model_id[:38]!s:<38}...{RESET}\r")
@@ -410,11 +421,11 @@ https://acmeagentsupply.com
 
 
 if __name__ == "__main__":
-    args = sys.argv[1:]
-    if "--help" in args or "-h" in args:
+    _args = sys.argv[1:]
+    if "--help" in _args or "-h" in _args:
         print_help()
         sys.exit(0)
-    if "--version" in args:
+    if "--version" in _args:
         print(f"acme-speedtest v{VERSION}")
         sys.exit(0)
     run()
