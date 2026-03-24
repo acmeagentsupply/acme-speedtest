@@ -154,13 +154,54 @@ def count_failures_by_hour(events: list[dict], model: str) -> list[tuple]:
 
 # ── Probe ─────────────────────────────────────────────────────────────────────
 
+def load_openclaw_keys() -> dict:
+    """Read API keys from OpenClaw config if available."""
+    config_path = Path.home() / ".openclaw" / "openclaw.json"
+    if not config_path.exists():
+        return {}
+    try:
+        # OpenClaw config uses HJSON-like format — try json first
+        import json as _json
+        text = config_path.read_text()
+        # Strip single-line comments (OpenClaw uses them)
+        lines = [l for l in text.splitlines() if not l.strip().startswith("//")]
+        cfg = _json.loads("\n".join(lines))
+        # Keys are in auth.profiles or env.vars
+        keys = {}
+        env_vars = cfg.get("env", {}).get("vars", {})
+        for k, v in env_vars.items():
+            if v and not v.startswith("__"):
+                keys[k] = v
+        # Also check auth profiles for provider tokens
+        profiles = cfg.get("auth", {}).get("profiles", {})
+        for profile_name, profile in profiles.items():
+            if "anthropic" in profile_name.lower():
+                # API key may be in keyring, not config — skip if redacted
+                pass
+        return keys
+    except Exception:
+        return {}
+
+_OC_KEYS: dict | None = None
+
+def get_api_key(env_name: str) -> str:
+    """Get API key from env var first, then OpenClaw config."""
+    val = os.environ.get(env_name, "")
+    if val:
+        return val
+    global _OC_KEYS
+    if _OC_KEYS is None:
+        _OC_KEYS = load_openclaw_keys()
+    return _OC_KEYS.get(env_name, "")
+
+
 def probe_model(model_id: str, provider: str) -> dict:
     """Send a minimal probe request and measure latency."""
     start = time.monotonic()
     try:
         if provider == "anthropic":
             import urllib.request, urllib.error
-            api_key = os.environ.get("ANTHROPIC_API_KEY", "")
+            api_key = get_api_key("ANTHROPIC_API_KEY")
             if not api_key:
                 return {"ok": False, "error": "no API key", "latency_ms": None}
             req = urllib.request.Request(
@@ -183,7 +224,7 @@ def probe_model(model_id: str, provider: str) -> dict:
 
         elif provider == "openai":
             import urllib.request
-            api_key = os.environ.get("OPENAI_API_KEY", "")
+            api_key = get_api_key("OPENAI_API_KEY")
             if not api_key:
                 return {"ok": False, "error": "no API key", "latency_ms": None}
             req = urllib.request.Request(
@@ -202,7 +243,7 @@ def probe_model(model_id: str, provider: str) -> dict:
 
         elif provider == "google":
             import urllib.request
-            api_key = os.environ.get("GOOGLE_API_KEY", "")
+            api_key = get_api_key("GOOGLE_API_KEY")
             if not api_key:
                 return {"ok": False, "error": "no API key", "latency_ms": None}
             model_name = model_id.split("/")[-1]
