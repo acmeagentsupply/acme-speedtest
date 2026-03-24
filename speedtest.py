@@ -334,5 +334,46 @@ def run():
     print()
 
 
+def print_help():
+    print(f"""
+{BOLD}acme-speedtest v{VERSION}{RESET}
+Model health and rate limit intelligence for AI agent operators.
+
+{BOLD}USAGE{RESET}
+  acme-speedtest [options]
+
+{BOLD}OPTIONS{RESET}
+  --help        Show this help
+  --version     Print version and exit
+  --no-probe    Skip live API probes (log analysis only, no API calls)
+  --json        Output results as JSON
+
+{BOLD}ENVIRONMENT{RESET}
+  ANTHROPIC_API_KEY     Required to probe Anthropic models
+  OPENAI_API_KEY        Required to probe OpenAI models
+  GOOGLE_API_KEY        Required to probe Google models
+  TRANSMISSION_CONFIG   Path to model config (default: ~/.openclaw/watchdog/transmission_config.json)
+  TRANSMISSION_LOG      Path to routing event log (default: ~/.openclaw/watchdog/transmission_events.log)
+
+{BOLD}EXAMPLES{RESET}
+  acme-speedtest                  # Full check — probe all models + rate limit history
+  acme-speedtest --no-probe       # Log analysis only (no API calls)
+  acme-speedtest --json           # Machine-readable output
+
+{BOLD}INSTALL{RESET}
+  curl -fsSL https://raw.githubusercontent.com/acmeagentsupply/acme-speedtest/main/install.sh | bash
+
+Free to use under ACME Freeware License v1. Not open source.
+https://acmeagentsupply.com
+""")
+
+
 if __name__ == "__main__":
+    args = sys.argv[1:]
+    if "--help" in args or "-h" in args:
+        print_help()
+        sys.exit(0)
+    if "--version" in args:
+        print(f"acme-speedtest v{VERSION}")
+        sys.exit(0)
     run()
